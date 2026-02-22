@@ -1,0 +1,285 @@
+PURPOSE: - To make combining GATK (Genome Analysis Toolkit) and Picard tools for SNP or Variant Calling
+Requirements:
+This SOP require a number of different software packages that need to interact smoothly. To download and install them. We will use Conda – a free package management system.
+1. To begin, download and install Miniconda (a minimal Conda installer), We’ll create and activate an environment called variant calling. In terminal, type:
+Shell-
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+source ~/miniconda3/bin/activate
+Download and install the conda (specially miniconda,which is a minimal Conda installer)
+2. Create and manage environment for variant calling
+$conda create -n varcall
+Pre-processing:
+1.	Preprocessing- Align Reads to map reads to the reference genome using bwa and Sort and index the alignment files.
+2.	Mark Duplicates- Identify and mark duplicate reads in the BAM files.
+3.	Variant Calling- Use GATK to call variants from the BAM files.
+4.	Variant Filtering- Apply filters to refine the variant calls.
+5.	Post-Processing- Annotate Variants, use tools like snpEff for annotation.
+Genome Indexing & Read Mapping For Variant Calling Experiments-
+We first need to map our sequencing reads to the corresponding reference genome of Rice. This step consists of two major pBSYs – indexing the reference genome and read mapping itself.
+3. To prepare our raw sequencing data for downstream analysis, we first need to perform quality control.
+There are directory-
+/mnt/d/RNA_NGS_Data 
+$ mkdir fastqc_initial
+$fastqc *fastq.gz -o ./fastqc_initial -t 2
+or
+*The-t 2 parameter instructs FastQC to use two cores of the computer.
+$fastqc SRR5130523.sralite.1 -o ./fastqc_initial
+4. After FastQC reports the results for each fastq file separately, we will use the MultiQC tool to aggregate the results
+brijesh_bioinfos@DESKTOP-JM56DA9:/mnt/d/RNA_NGS_Data
+$multiqc /mnt/d/RNA_NGS_Data/fastqc_initial –o /mnt/d/RNA_NGS_Data/fastqc_initial/multiqc --force
+5. Next, let’s check for the presence of adapter sequences which may have been introduced during the process of library preparation. As you can see in the “Adapter content” section of the report, no traces of adapter sequences were observed. When these sequences are found, it is important to trim them out – but in our case, that is not necessary.
+A. We did trim our RNA-Seq data using the software cutadapt -
+$cutadapt -a TTTCA -g GATAT –o SSRR5130523.sralite_1.1_trimmed.fastq  SRR5130523.sralite_1.1.fastqc
+*Trimmed 5 sequence forward and reverse
+Again to check quality control through FastQC and their reports
+B. fastp: an ultra-fast all-in-one FASTQ preprocessor and global trimming, which means trim all reads in the front or the tail.
+$ fastp -i BSY-02_R1.fastq.gz -I BSY-16_R2.fastq.gz -o /mnt/d/RNA_NGS_Data/trimmed/BSY-16_trimmed_R1.fastq.gz -O /mnt/d/RNA_NGS_Data/trimmed/BSY-02_trimmed_R2.fastq.gz 
+$conda install bwa samtools --channel conda-forge --channel bioconda –strict-channel-priority
+7. Genome Indexing-
+Indexing to a reference genome
+$bwa index -p riceSNP /home/nihar/raw_data/rice/ Oryza_indica.ASM465v1.dna.toplevel.fa
+8. Read Mapping
+$sudo apt update
+$sudo apt install openjdk-17-jdk
+$conda install -c bioconda picard=2.18.23
+$ conda create -n picard-env openjdk=17 picard
+$ picard CreateSequenceDictionary REFERENCE=/mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa OUTPUT=reference.dict
+To begin mapping our sequencing reads to the reference genome of Rice, directory to mapping:
+(varcall) brijesh_bioinfos@DESKTOP-JM56DA9:/mnt/d/RNA_NGS_Data/rice_India_SNP
+$ bwa mem -R "@RG\tID:FLOWCELL1.LANE1\tPL:ILLUMINA\tLB:test\tSM:PA01" /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa /mnt/d/RNA_NGS_Data/trimmed/BSY-02_trimmed_R1.fastq.gz /mnt/d/RNA_NGS_Data/trimmed/BSY-02_trimmed_R2.fastq.gz > BSY-02.1.sam 
+Convert SAM to BAM, sort, and index the BAM file using Picard:
+Note: (varcall) brijesh_bioinfos@DESKTOP JM56DA9:/mnt/d/RNA_NGS_Data/rice_India_SNP
+$ find /mnt/d/RNA_NGS_Data/ -name "picard.jar"
+$ chmod +r /mnt/d/RNA_NGS_Data/SNPCalling/picard.jar
+$java -jar /mnt/d/RNA_NGS_Data/SNPCalling/picard.jar MarkDuplicates I=BSY-02.sam O=BSY-02.bam M=metrics.txt
+# Convert SAM to BAM
+picard SamFormatConverter I=sample_aligned.sam O=sample_aligned.bam
+
+# Sort BAM file
+$picard SortSam INPUT=BSY-01.1.sam OUTPUT=BSY-01.1.sorted.bam SORT_ORDER=coordinate
+or
+$java -jar /mnt/d/RNA_NGS_Data/SNPCalling/picard.jar SortSam \ I=BSY-05.bam \ O=BSY-05.sorted.bam \ SORT_ORDER=coordinate
+
+9. Alignment Summary
+It is to be noted that these quality filters are specific to Illumina data. In the next step, the “CollectInsertSizeMetrics” parameter of GATK provides useful metrics for validating library construction including the insert size distribution and read orientation of paired-end libraries. It produces the percentages of read pairs in three orientations (Forward Reverse, Reverse Forward, and TANDEM) as a histogram.
+
+$ picard CollectAlignmentSummaryMetrics 
+R=/mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa I=BSY-01.1.sorted.bam O=alig1.metrics.txt
+
+10. Mark Duplicates-
+Duplicate reads are the result of Polymerase Chain Reaction (PCR) in sequencers. The duplication events arise at different rates as the sequencing experiment proceeds. The duplicate reads might come from the same input DNA template; thus, it can be assumed that they have the same stBSY position on the reference in an alignment.
+Mark duplicates in the sorted BAM file using Picard:
+$picard MarkDuplicates I=BSY-02.1.sorted.bam O=BSY_02.dedup2.bam METRICS_FILE=metrics2.txt
+11. Adding Read Group (RG) tags
+In this step, all the reads in the BAM file are assigned to a single new Read Group (RG). Picard and GATK require the presence of at least one RG tag – to which each read can be assigned. In this example, after assigning the reads to a Read Group with arguments “RGID=1 RGLB=lib2 RGPL=illumina RGPU=unit1 RGSM=3”, the “dedup_reads_RG1.bam” will have an entry stating:
+-RG     ID:1    LB:lib2 PL:illumina     SM:3    PU:unit1- Where “RGID” refers to the “Read Group ID”, “RGLB” refers to “Read-Group library”, “RGPL” refers to “Read-Group platform” (in this example the platform is Illumina), “RGPU” refers to “Read-Group platform unit” (eg. run barcode), and “RGSM” refers to “Read-Group sample name”.
+$picard AddOrReplaceReadGroups   I=BSY_01.dedup1.bam   O=BSY_01.dedup.RG1.bam   RGID=1   RGLB=lib1   RGPL=illumina   RGPU=unit1   RGSM=Sample1
+$picard AddOrReplaceReadGroups   I=BSY_02.dedup2.bam   O=BSY_02.dedup.RG2.bam   RGID=2   RGLB=lib1   RGPL=illumina   RGPU=unit1   RGSM=Sample2
+$ samtools view –H BSY_01.dedup.RG1.bam
+$samtools flagstat BSY_01.dedup1.bam
+12. Building BAM Index
+With reference to the importance of “indexing” stated in the “Sorting” section – in this step – the “dedup” or “duplicate-read-marked” BAM file is indexed to improve the efficiency of downstream variant identification processes.
+$ picard BuildBamIndex I= BSY_01.dedup.RG1.bam
+
+13. Create Reference Sequence Dictionary
+In this step, a reference genome sequence dictionary is created with a “.dict” extension – required for the downstream processing and analysis tools. The output “.dict” file contains only a header with sequence records but no SAM records.
+
+$gatk CreateSequenceDictionary –R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa 
+
+14. Reference Sequence Index
+For efficient pattern matching and downstream variant call processing, the reference genome sequence is indexed.
+
+$samtools faidx /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa
+
+15.Knownsites Indexing
+“Knownsites” are the already annotated or known variants present in the public or commercial variant repositories. Indexing these variants using “tabix“ improves the computational speed and performance for downstream tools and analysis.
+
+$tabix -p vcf oryza_indica.vcf.gz
+
+16. Handling Splicing Events in RNASeq Data
+Since RNA aligners have different conventions than DNA aligners, we need to reformat some of the alignments that span introns for HaplotypeCaller. This method splits reads with N in the cigar into multiple supplementary alignments and hard clips mismatching overhangs. By default, this step also reassigns mapping qualities for good alignments to match DNA conventions.
+
+Furthermore, the algorithm identifies all N cigars and creates k+1 new reads (where k is the number of N cigar elements). The first read includes the bases to the left of the first N element and the pBSY to the right of the N (including the Ns) is hard clipped. 
+
+$ gatk SplitNCigarReads -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa -I BSY_01.dedup.RG1.bam -O BSY_01.dedup.RG1.splitreads.bam
+
+17. Base Quality Recalibration
+This is an important step. As a pBSY of the data pre-processing step, it detects systematic errors in the estimation of base call accuracy carried out by the sequencing machine.
+
+The two keys steps are:
+
+The BaseRecalibrator is used to build a recalibration model (“recal_data.table” in the provided example) by using all the reads in the input BAM file and the set of known variants (“knownsites”).
+In the next step, the ApplyBQSR adjusts the base quality scores in the data based on the recalibration model and produces a new BAM file (“recal_reads.bam” in the provided example).
+
+$java -jar /home/brijesh_bioinfos/SNPCalling/gatk-4.6.0.0/gatk-package-4.6.0.0-local.jar BaseRecalibrator \
+  -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+  -I BSY_01.dedup.RG1.splitreads.bam \
+  --known-sites oryza_indica.vcf.gz \
+  -O recal_data1.table
+
+$ java -jar /home/brijesh_bioinfos/SNPCalling/gatk-4.6.0.0/gatk-package-4.6.0.0-local.jar ApplyBQSR \
+  -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+  -I BSY_01.dedup.RG1.splitreads.bam \
+  --bqsr-recal-file recal_data1.table \
+  -O recal_BSY01.bam
+
+Variant Discovery
+
+18. Variant Calling
+ Performing variant calls on germplasm RNASeq data, hence the “HaplotypeCaller” argument is used.  In this step, the program first determines the active regions based on the presence of evidence for variation. Next, for each active region, it builds a De Bruijn-like graph to reassemble the region and identify the haplotypes (a group of alleles in an organism that is inherited together from a single parent) in the data. Afterwards, realignment of each haplotype is performed against the reference haplotype to determine potentially variant sites. Further, for each active region, a pairwise alignment of each read against each haplotype is performed using the PairHMM algorithm – to produce a matrix of likelihoods of haplotypes. These likelihoods are then marginalized to acquire likelihoods of alleles for each potential variant site given the read data. In the end, Bayes’ rule is applied for each potential variant site using the likelihoods of alleles to calculate the likelihoods of each genotype per sample given the read data observed for that sample; eventually, the most likely genotype is assigned to the sample. Finally, the called variants with their genotype are output as a Variant Call Format (VCF) file (“raw_variants.vcf” in this example).
+
+Single
+
+$gatk --java-options "-Xmx4g" HaplotypeCaller -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa -I recal_BSY01.bam -O raw_BSY01.vcf -bamout bamout.bam
+
+Note: Recommend doing joint genotyping.
+
+$ gatk --java-options "-Xmx4g" HaplotypeCaller \
+  -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+  -I recal_BSY01.bam \
+  -I recal_BSY02.bam \
+  -I recal_BSY03.bam \
+  -I recal_BSY04.bam \
+  -I recal_BSY05.bam \
+  -I recal_BSY06.bam \
+  -O raw_all_samples.vcf \
+  -bamout combined_bamout.bam
+
+19. Variant Selection
+Selection of called variants is performed using the “SelectVariants” argument of GATK. Different options can be used for selecting subsets of variants from a larger variant callset. To get a complete understanding of these options
+SNPS
+
+Single sample
+
+$ gatk SelectVariants \
+-R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa  \
+-V raw_BSY01.vcf \
+--select-type-to-include SNP \
+-O raw_BSY01_snps.vcf
+
+Or six samples
+
+$ gatk SelectVariants \
+  -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+  -V raw_six_samples.vcf \
+  --select-type-to-include SNP \
+  -O raw_six_samples_snps.vcf
+
+Single sample
+INDELS
+$ gatk SelectVariants \
+  -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+  -V raw_BSY01.vcf \
+  --select-type-to-include INDEL \
+  -O raw_BSY01_indels.vcf
+
+Or six samples
+gatk SelectVariants \
+  -R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+  -V raw_six_samples.vcf \
+  --select-type-to-include INDEL \
+  -O raw_six_samples_indels.vcf
+
+20. Variant Filtration
+In every VCF file, there are 9 mandatory columns (#CHROM  POS     ID      REF     ALT     QUAL    FILTER  INFO    FORMAT) followed by the sample column. It is important to understand the standards of VCF format before using the VCF filtering tools. 
+The variants called in the previous step are hard-filtered based on the INFO and/or FORMAT annotations of the VCF file. In the example, the values chosen for filters are case-specific. The filter values may vary depending on the type of experiment and the sequence data.
+
+SNPS
+$gatk VariantFiltration \
+-V raw_six_samples_snps.vcf \
+--filter "QD < 2.0" --filter-name "QD2" \
+--filter "QUAL < 30.0" --filter-name "QUAL30" \
+--filter "SOR > 3.0" --filter-name "SOR3" \
+--filter "FS > 60.0" --filter-name "FS60" \
+--filter "MQ < 40.0" --filter-name "MQ40" \
+-O raw_six_snps-filter.vcf
+
+Indel 
+$gatk VariantFiltration \
+  -V raw_six_sample.indels.vcf \
+  --filter "QD < 2.0" --filter-name "QD2" \
+  --filter "QUAL < 30.0" --filter-name "QUAL30" \
+  --filter "SOR > 3.0" --filter-name "SOR3" \
+  --filter "FS > 60.0" --filter-name "FS60" \
+  --filter "MQ < 40.0" --filter-name "MQ40" \
+  -O raw_six_indels-filter.vcf
+
+Simple Code
+$vcffilter -f 'DP > 9' -f 'QUAL > 10' raw_7_12_samples.snp.vcf > raw_7_12_samples.snp.filtered.vcf
+
+java -jar /mnt/d/RNA_NGS_Data/rice_India_SNP/snpEff/snpEff.jar ann Oryza_sativa /mnt/d/RNA_NGS_Data/rice_India_SNP/raw_six_snps-filter.vcf > final_six_snps-filter.vcf
+
+
+21. Building Database For Variant Annotation
+Once the variants are filtered, the next step is to annotate them. For this step, a local database is created from the UCSC’s RefSeq table. More information on database creation for snpEFF can be found here: https://pcingola.github.io/SnpEff/se_buildingdb/
+
+$java -jar snpEff.jar build -gff3 /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.gff3
+
+22. Variant Annotation
+Once the local database is created, we annotate the variants using the “snpEff” tool.
+SNPS
+
+$ java -jar snpEff.jar ann Oryza_indica /mnt/d/RNA_NGS_Data/rice_India_SNP/final_six_snps-filter.vcf > /mnt/d/RNA_NGS_Data/rice_India_SNP/anno_snps-filter.vcf
+
+InDEL
+$ java -jar snpEff.jar ann Oryza_indica /mnt/d/RNA_NGS_Data/rice_India_SNP/raw_six_indels-filter.vcf > /mnt/d/RNA_NGS_Data/rice_India_SNP/anno_indel-filter.vcf
+
+Annotation another way:
+
+$java -jar snpEff.jar -v -stats output_6.html -c snpEff.config Oryza_indica /mnt/d/RNA_NGS_Data/rice_India_SNP/Control_vcf/raw_1_6_samples.snp.filtered.vcf > /mnt/d/RNA_NGS_Data/rice_India_SNP/Control_vcf/anno_sample1_6.snp.vcf
+
+23. Variant Callset Quality Control
+Variant callset quality control (QC) involves evaluating the accuracy of called variants by assessing key metrics such as the number of SNPs and INDELs, Indel ratio, and TiTv ratio (transition-to-transversion ratio)
+
+$bgzip -c anno_snps-filter.vcf > anno_snps-filter.vcf.gz
+$tabix -f -p vcf anno_snps-filter.vcf.gz
+
+$bgzip -c anno_indel-filter.vcf > anno_indel-filter.vcf.gz
+$tabix -f -p vcf anno_indel-filter.vcf.gz
+
+
+$java -jar /home/brijesh_bioinfos/SNPCalling/gatk-4.6.0.0/gatk-package-4.6.0.0-local.jar \
+    CollectVariantCallingMetrics \
+    INPUT=anno_snps-filter.vcf.gz \
+    OUTPUT=anno_snps-filter-eval \
+    DBSNP=/mnt/d/RNA_NGS_Data/rice_India_SNP/oryza_indica.vcf.gz
+
+$ java -jar /home/brijesh_bioinfos/SNPCalling/gatk-4.6.0.0/gatk-package-4.6.0.0-local.jar \
+    CollectVariantCallingMetrics \
+    INPUT=anno_snps-filter.vcf.gz \
+    OUTPUT=anno_snps-filter-eval \
+    DBSNP=/mnt/d/RNA_NGS_Data/rice_India_SNP/oryza_indica.vcf.gz
+
+24. Extracting variants of Interest
+The final step after variant quality evaluation could be to filter large genomic datasets in order to find the most significant variants for experiment. This can be performed using “snpSift”. In the example below, we are extracting all the “missense variants” from the annotated VCF file.
+
+$java -jar //mnt/d/RNA_NGS_Data/rice_India_SNP/snpEff/snpSift.jar filter "ANN[*].EFFECT = 'missense_variant'" /mnt/d/RNA_NGS_Data/rice_India_SNP/anno_snps-filter.vcf > /mnt/d/RNA_NGS_Data/rice_India_SNP/missense_snp.vcf
+
+Note: If want to extract a set of chromosomal regions from the VCF file to be analyzed further,  use “tabix”. In this example, I am extracting all SNPs belonging to a region between genomic coordinates 30000000 and 40000000 of chromosome 1. Please note that to perform this step, the VCF file should be “bgzipped” and “tabixed” as shown in “Step 20”
+$ tabix anno_snps-filter.vcf.gz chr1:30000000-40000000
+
+25. To check the number of SNPs
+ In each of the VCF files (raw VCF, filtered VCF, and annotated VCF), you can use a simple grep command to count the number of lines containing SNPs. Since VCF files follow a specific format, SNP records generally stBSY with a # symbol for headers or are data lines stBSYing with the chromosome (e.g., chr1, chr2, etc.). For SNPs, the INFO field will contain the details, including the type of variant, such as SNP
+
+$grep -v "^#" raw_six_samples.vcf | grep -v "INDEL" | wc –l
+$ grep -v "^#" raw_six_snps-filter.vcf | grep -v "INDEL" | wc –l
+$ grep -v "^#" anno_snps-filter.vcf | grep -v "INDEL" | wc –l
+$ grep -v "^#"  anno_snps-filter.vcf | wc -l
+26. Using bcftools to extract genotypes
+
+$ bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[%GT]\n' anno_snps-filter.vcf > anno_snp.genotypes.txt
+
+
+27. Convert vcf to hampmap
+gatk VariantsToTable \
+-V filter_QUAL10_six.vcf \
+-R /mnt/d/RNA_NGS_Data/Oryza_indica.ASM465v1.dna.toplevel.fa \
+-F CHROM -F POS -F REF -F ALT -GF GT \
+-O output.table
+Note: Next Step to make SOP for output.table to hapmap file.
+
+Separate chromosomes in a FASTA file:
+&awk '/^>/ {if (seq) print seq; seq=""; print $0; next} {seq = seq $0} END {if (seq) print seq}' Oryza_indica.ASM465v1.dna.toplevel.fa | \
+    awk 'BEGIN {FS=" >"} {if ($1 != "") {print ">"$1 > "chromosome_" NR ".fa"}}'
+$cat chromosome_1.fa
