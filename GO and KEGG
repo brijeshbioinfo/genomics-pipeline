@@ -1,0 +1,81 @@
+Linux Environment:
+1.	Download annotation from RAPDB
+ $wget https://rapdb.dna.affrc.go.jp/download/archive/irgsp1/IRGSP-1.0_representative_annotation_2021-11-11.tsv.gz
+gunzip IRGSP-1.0_representative_annotation_2021-11-11.tsv.gz
+2.	Extract the annotation information
+cat IRGSP-1.0_representative_annotation_2021-11-11.tsv | perl -nale 'my @matches = ($_ =~ m/(GO:\d+)/g); foreach my $go (@matches) {print "$go\t$F[1]";} '| sort -u  > rice_rapdb_go_list.tsv
+3.	Download annotation from OryzaBase
+'download?classtag=GENE_EN_LIST',
+$wget https://shigen.nig.ac.jp/rice/oryzabase/gene/download?classtag=GENE_EN_LIST
+4.	Extract the annotation information
+cat 'download?classtag=GENE_EN_LIST' | cut -f11,16 | grep -v "^\t" | perl -nle 'chomp; my @F=split /\t/, $_; my @id = ($F[0] =~ m/(Os[0-9]{2}g[0-9]{7})/g); my @go = ($F[1] =~ m/(GO:\d+)/g); if (@go>=1){ foreach my $id (@id) {  foreach my $go (@go){ print "$go\t$id" } } }' | sort -u > rice_oryzabase_go_list.tsv
+5.	Combine the two annotation files together
+cat rice_rapdb_go_list.tsv rice_oryzabase_go_list.tsv | sort -u | perl -nple 'BEGIN {print "go_id\tgene_id";} ' > rice_combined_go_list.tsv
+6.	Prepare self-provided GO annotations for clusterProfiler function.
+An R script to make GO term ID to GO term name mapping 
+7.	One table per one GO subcategory, i.e. BP, MF, CC.
+library(GO.db)
+library(dplyr)
+8.	Make GO ID-GO name mapping tables
+
+9.	Extract GO term information from a Bioconductor package, GO.db 
+go_table <- as.data.frame(GOTERM)
+10.	 Only take go_id, Term, and Oncology columns and remove duplicated rows
+godb <- unique(go_table[,c(1,3,4)])
+11.	 Separate the GO terms into 3 ontology types
+godb_BP <- godb[godb$Ontology == "BP", 1:2]
+godb_MF <- godb[godb$Ontology == "MF", 1:2]
+godb_CC <- godb[godb$Ontology == "CC", 1:2]
+12.	Save results
+write.table(godb_BP, "cache/godb_BP.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(godb_MF, "cache/godb_MF.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(godb_CC, "cache/godb_CC.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+13.	 Make GO ID-Gene ID mapping table
+# read the rice gene annotation file
+goid2gene_all <- read.table("cache/rice_combined_go_list.tsv", header=T, sep="\t", quote="", stringsAsFactors = F)
+14.	 Seperate genes based on their GO annotation types
+goid2gene_BP <- goid2gene_all %>% dplyr::filter(go_id %in% godb_BP$go_id)
+goid2gene_MF <- goid2gene_all %>% dplyr::filter(go_id %in% godb_MF$go_id)
+goid2gene_CC <- goid2gene_all %>% dplyr::filter(go_id %in% godb_CC$go_id)
+15.	 Save results
+write.table(goid2gene_BP, "cache/goid2gene_BP.txt", sep="\t", row.names=FALSE, quote=FALSE)
+write.table(goid2gene_MF, "cache/goid2gene_MF.txt", sep="\t", row.names=FALSE, quote=FALSE)
+write.table(goid2gene_CC, "cache/goid2gene_CC.txt", sep="\t", row.names=FALSE, quote=FALSE)
+16.	 Run universal enrichment function, enricher.
+## Save the output to a table, and visualize the results by a plot.
+library(clusterProfiler)
+library(ggplot2)
+17.	 Read gene lists and annotation files
+# genes of interest
+genes <- read.table("input/genes.txt", header=T)
+genes <- genes[[1]]
+# background genes
+bkgd <- read.table("input/bkgd.txt", header=T)
+bkgd <- bkgd[[1]]
+18.	 TERM2GENE
+term2gene <- read.table("cache/goid2gene_BP.txt", sep="\t", header=T, quote="", stringsAsFactors = F)
+19.	 TERM2NAME
+term2name <- read.table("cache/godb_BP.txt", sep="\t", header=T, quote="", stringsAsFactors = F)
+
+20.	 Run the universal enrichment function, enricher
+go <- enricher(gene = genes, # a vector of gene id
+               universe = bkgd,  # background genes
+A.	TERM2GENE = term2gene, # user input annotation of TERM TO 2GENE mapping 
+B.	TERM2NAME = term2name, # user input of TERM TO NAME mapping
+C.	 pvalueCutoff = 0.05, # p-value cutoff (default)
+D.	pAdjustMethod = "BH", # multiple testing correction method to calculate adjusted p-value (default)
+E.	qvalueCutoff = 0.2, # q-value cutoff (default). q value: local FDR corrected p-value.
+F.	minGSSize = 10, # minimal size of genes annotated for testing (default)
+G.	maxGSSize = 500  # maximal size of genes annotated for testing (default)
+              )
+21.	 Save results
+go_df <- as.data.frame(go)
+write.table(go_df, "output/go_df.txt", sep="\t", row.names=FALSE, quote=FALSE)
+22.	 Dot plot
+p1 <- dotplot(go, showCategory=10, 
+              title = "Top 10 most statistically significant enriched GO terms (BP)",
+              font.size = 10)
+ggsave(p1,
+       filename = "figures/go_dotplot.png",
+       height = 12,width = 20,units = "cm") 
+23.	 Step 3: KEGG enrichment analysis using annotations from KEGG database
