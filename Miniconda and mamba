@@ -1,0 +1,55 @@
+This shell script sets up a bioinformatics environment using Miniconda and mamba, which is a fast package manager compatible with conda
+Shell-
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+3.	bash Miniconda3-latest-Linux-x86_64.sh
+4.	source ~/miniconda3/bin/activate
+5.	$ conda deactivate
+6.	$ conda create -n rnaseq
+7.	 $ conda activate rnaseq
+
+Next, let's configure our Conda channels with the following commands:
+8.	 $ conda config --add channels defaults
+9.	 $ conda config --add channels bioconda
+10.	 $ conda config --add channels conda-forge
+11.	 $ conda config --set channel_priority strict
+We have now set up our computing environment and can move on to the next step. We will use Conda to download and manage software on the go.
+To activate this environment, use on Bioconda
+12.	     $ mamba activate myenvname
+To deactivate an active environment, use
+13.	     $ mamba deactivate
+ The SRA Toolkit and SDK from NCBI
+14.	   $  mamba install sra-tools
+         and update with::
+15.	    $   mamba update sra-tools
+A quality control tool fastqc for high throughput sequence data.
+16.	 $  mamba install fastqc
+and update with::
+17.	 $  mamba update fastqc
+In the recipe multiqc- create aggregate bioinformatics analysis reports across many samples and tools.
+18.	 $ mamba install multiqc
+and update with::
+19.	 $  mamba update multiqc
+Recipe cutadapt- Trim adapters from high-throughput sequencing reads
+20.	 $ mamba install cutadapt
+and update with::
+21.	 $  mamba update cutadapt
+Recipe fastp- A ultra-fast FASTQ preprocessor with full features (QC/adapters/trimming/filtering/splitting…
+22.	 $ mamba install fastp
+    and update with::
+23.	 $   mamba update fastp
+Recipe hisat2- Graph-based alignment of next generation sequencing reads to a population of genomes.
+24.	 $  mamba install hisat2
+      and update with::
+25.	 $   mamba update hisat2
+seqtk to Fast to conversion-
+26.	 $   mamba install seqtk
+and update with::
+27.	 $   amba update seqtk
+Recipe samtools- Tools for dealing with SAM, BAM and CRAM files
+28.	$  mamba install samtools
+and update with::
+29.	$  mamba update samtools
+Subread tool- High-performance read alignment, quantification, and mutation discovery
+30.	 $ mamba install subread
+and update with::
+31.	$ mamba update subread
