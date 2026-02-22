@@ -1,0 +1,54 @@
+The code provided extracts the sequence of a specific gene, "BGIOSGA008638," from the rice genome using data from a GTF file and a reference genome in FASTA format.
+Load Reference Genome: The rice genome is loaded as a dictionary from a FASTA file using SeqIO, allowing quick access to genomic sequences by chromosome.
+Parse GTF File: The GTF file, which contains genomic annotations, is read using the gtfparse library. It specifies gene locations and attributes, including gene IDs and transcript information.
+Gene Extraction: For each GTF row, the code checks if the transcript field contains the gene of interest (e.g., "BGIOSGA008638"). If a match is found, the corresponding chromosome, start, and end positions are used to extract the gene sequence from the genome.
+Sequence Storage: The extracted sequence is stored and saved in a FASTA file for further analysis.
+This process ensures that the desired gene sequence is retrieved and saved based on its annotation in the GTF file.
+
+from Bio import SeqIO
+from gtfparse import read_gtf
+import re
+
+# Load the reference genome (FASTA format)
+genome = SeqIO.to_dict(SeqIO.parse("Oryza_indica.ASM465v1.dna.toplevel.fa", "fasta"))
+
+# Load your GTF file
+gtf_data = read_gtf("Oryza_indica.gtf")
+
+# Extract sequence for the specific gene "BGIOSGA008638"
+gene_id_to_extract = "BGIOSGA008638"
+
+# Dictionary to store gene sequences
+gene_sequence = ""
+
+# Extract sequence for the specific gene
+for row in gtf_data.iter_rows():
+    attribute_field = row[8]  # The attributes column (9th column)
+    print(f"Checking attributes for row: {attribute_field}")  # Debug print
+
+    # Adjusted regex to capture gene ID from transcript field (before '-TA')
+    match = re.search(r'transcript:([^\s;]+)-TA', attribute_field)  # Updated regex
+    
+    if match:
+        gene_id = match.group(1)  # Extract the gene ID from the transcript ID (before '-TA')
+        print(f"Found gene ID: {gene_id}")  # Debug print
+        
+        # If this is the gene we want, extract its sequence
+        if gene_id == gene_id_to_extract:
+            chr = row[0]  # Chromosome name (row[0])
+            start = row[3]  # Start position (row[3])
+            end = row[4]  # End position (row[4])
+
+            # Extract the gene sequence (adjusting for 0-based indexing)
+            gene_seq = genome[chr].seq[start-1:end]  # GTF is 1-based, adjust to 0-based
+            gene_sequence += str(gene_seq)  # Append sequence to the gene
+    else:
+        print(f"Gene ID not found for attributes: {attribute_field}")  # Log if gene ID is missing
+
+# Check if we successfully extracted the gene sequence
+if gene_sequence:
+    with open(f"{gene_id_to_extract}_sequence.fasta", "w") as f:
+        f.write(f">{gene_id_to_extract}\n{gene_sequence}\n")
+    print(f"Gene sequence for {gene_id_to_extract} extracted and saved.")
+else:
+    print(f"Gene {gene_id_to_extract} not found in the GTF file.")
