@@ -1,0 +1,148 @@
+To make RNA-Seq data analysis pipeline.
+raw_data
+raw_data/trimming
+ref_gen
+mapping
+2.	To create these directories, run the following command:
+Shell
+In our directory name-
+/home/raw_data/rice/
+$ mkdir -p ./ref_gen/ ./mapping ./raw_data/trimming
+3.	We  already download the data from Sequence Read Archive (SRA) using SRA  for example-4 sample where 2 are leaves 1 control and blast (Magnaporthe oryza) and 2 panicle) are same, control and infected-
+SRR5130523,
+SRR5130524,
+SRR5130525,
+SRR5130526
+https://www.ncbi.nlm.nih.gov/sra/?term=SRR5130523
+
+$ wget https://sra-downloadb.be-md.ncbi.nlm.nih.gov/sos5/sra-pub-zq-14/SRR005/130/SRR5130523.sralite.1
+4.	The SRA file have to change fastqc for further analysis-
+      $fastq-dump --split-files SRR5130523.sralite.1
+5.	To prepare our raw sequencing data for downstream analysis, we first need to perform quality control via FastQC.
+There are directory-
+/home/nihar/raw_data/rice/neckblast/fastqc
+$fastqc *fastq.gz -o ./fastqc_initial -t 2
+or
+*The-t 2 parameter instructs FastQC to use two cores of the computer.
+$fastqc SRR5130523.sralite.1 -o ./fastqc_initial
+6.	After FastQC reports the results for each fastq file separately, we will use the MultiQC tool to aggregate the results
+rice/raw_data/rice/neckblast/fastqc
+multiqc.
+7.	 Look at the Phred scores for specific samples, FastQC produces html reports, which can be viewed in any browser through filezila. Open the file SRR5130523.sralite_1.1.fastqc.html, which is the reverse read report for the sample SRR5130523.sralite.
+8.	 Next, let’s check for the presence of adapter sequences which may have been introduced during the process of library preparation. As you can see in the “Adapter content” section of the report, no traces of adapter sequences were observed. When these sequences are found, it is important to trim them out – but in our case, that is not necessary.
+9.	We did trim our RNA-Seq data using the software cutadapt -
+
+$cutadapt -a TTTCA -g GATAT -o SSRR5130523.sralite_1.1_trimmed.fastq  SRR5130523.sralite_1.1.fastqc
+*Trimmed 5 sequence forward and reverse
+10. Again to check quality control through FastQC and their reports
+11. Fastp: an ultra-fast all-in-one FASTQ pre-processor and global trimming, which means trim all reads in the front or the tail.
+$fastp –in1 SRR5130523.sralite_1.1.fastqc --in2 SRR5130523.lite.1_2.fastq --out1 SRR5130523.R1.trimmed.fastq --out2 SRR5130523.R2.trimmed.fastq -h SRR1.html &> SRR.log
+12. RNA-Seq Read Mapping and Quantification - HISAT2 is a fast and sensitive alignment program for mapping next-generation sequencing reads
+BSYs@DESKTOP-JM56DA9:/mnt/d/RNA_NGS_Data/rice_india_RNA 
+$ hisat2-build Oryza_indica.ASM465v1.dna.toplevel.fa index_name
+$ hisat2 -x /mnt/d/RNA_NGS_Data/rice_india_RNA/index_name -1 /mnt/d/RNA_NGS_Data/trimmed/BSY-01_trimmed_R1.fastq.gz -2 /mnt/d/RNA_NGS_Data/trimmed/BSY-01_trimmed_R2.fastq.gz -S BSY-01.sam
+15147132 reads; of these:
+  15147132 (100.00%) were paired; of these:
+    1065738 (7.04%) aligned concordantly 0 times
+    13230967 (87.35%) aligned concordantly exactly 1 time
+    850427 (5.61%) aligned concordantly >1 times
+    1065738 pairs aligned concordantly 0 times; of these:
+      41131 (3.86%) aligned discordantly 1 time
+    1024607 pairs aligned 0 times concordantly or discordantly; of these:
+      2049214 mates make up the pairs; of these:
+        1770661 (86.41%) aligned 0 times
+        254456 (12.42%) aligned exactly 1 time
+        24097 (1.18%) aligned >1 times
+94.16% overall alignment rate
+13. SAM files generated after mapping using hisat-2 sorted ‘*.mapped.bam’ dataset details, the dataset information section says the format is BAM
+Seprate:
+BSYs@DESKTOP-JM56DA9:/mnt/d/RNA_NGS_Data/rice_india_RNA 
+$ samtools view -Sb BSY-01.sam > BSY-01.bam
+$ samtools quickcheck BSY-01.bam
+Looping (Combined):
+(rnaseq) BSYs@DESKTOP-JM56DA9:/mnt/d/RNA_NGS_Data/rice_india_RNA
+$ for file in BSY-*.sam; do samtools view -Sb "$file" > "${file%.sam}.bam"; done
+$ samtools sort BSY-01.bam -o BSY-01.sorted.bam
+$ samtools index BSY-01.sorted.bam
+Note: $ samtools merge merged.bam file1.r1.bam file2.r2.bam
+         $ samtools cat sorted_file1.r1.bam sorted_file2.r2.bam > merged.bam
+         $ samtools view RR5130524.MP.sorted.bam | head -n 20
+         $ samtools flagstat RR5130524.MP.sorted.bam 
+14. FeatureCounts: an ultrafast and accurate read summarization program and featureCounts is a highly efficient general-purpose read summarization program that counts mapped reads for genomic features such as genes, exons, promoter, gene bodies, genomic bins and chromosomal locations. It can be used to count both RNA-seq and genomic DNA-seq reads.
+$ wget  https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/release-60/gff3/oryza_indica/Oryza_indica.ASM465v1.60.gff3.gz 
+$ gffread Oryza_indica.ASM465v1.60.gff3 -T -o Oryza_indica.gtf
+Issue: $ samtools quickcheck BSY-01.bam
+$samtools fixmate BSY-01.bam BSY-01.fixed.bam
+$ featureCounts -p -g gene_id -t exon -a Oryza_indica.gtf -o BSY-01.txt BSY-01.fixed.bam   
+Note: Rest of them working just only first sample have issue.
+$(rnaseq) BSYs@DESKTOP-JM56DA9:/mnt/d/RNA_NGS_Data/rice_india_RNA$ featureCounts -p -g gene_id -t exon -a Oryza_indica.gtf -o BSY-05.txt BSY-05.bam
+
+        ==========     _____ _    _ ____  _____  ______          _____
+        =====         / ____| |  | |  _ \|  __ \|  ____|   /\   |  __ \
+          =====      | (___ | |  | | |_) | |__) | |__     /  \  | |  | |
+            ====      \___ \| |  | |  _ <|  _  /|  __|   / /\ \ | |  | |
+              ====    ____) | |__| | |_) | | \ \| |____ / ____ \| |__| |
+        ==========   |_____/ \____/|____/|_|  \_\______/_/    \_\_____/
+          v2.0.6
+
+//========================== featureCounts setting ===========================\\
+||                                                                            ||
+||             Input files : 1 BAM file                                       ||
+||                                                                            ||
+||                           BSY-05.bam                                       ||
+||                                                                            ||
+||             Output file : BSY-05.txt                                       ||
+||                 Summary : BSY-05.txt.summary                               ||
+||              Paired-end : yes                                              ||
+||        Count read pairs : no                                               ||
+||              Annotation : Oryza_indica.gtf (GTF)                           ||
+||      Dir for temp files : ./                                               ||
+||                                                                            ||
+||                 Threads : 1                                                ||
+||                   Level : meta-feature level                               ||
+||      Multimapping reads : not counted                                      ||
+|| Multi-overlapping reads : not counted                                      ||
+||   Min overlapping bases : 1                                                ||
+||                                                                            ||
+\\============================================================================//
+
+//================================= Running ==================================\\
+||                                                                            ||
+|| Load annotation file Oryza_indica.gtf ...                                  ||
+||    Features : 171782                                                       ||
+||    Meta-features : 42031                                                   ||
+||    Chromosomes/contigs : 2140                                              ||
+||                                                                            ||
+|| Process BAM file BSY-05.bam...                                             ||
+||    Paired-end reads are included.                                          ||
+||    The reads are assigned on the single-end mode.                          ||
+||    Total alignments : 30071167                                             ||
+||    Successfully assigned alignments : 17590403 (58.5%)                     ||
+||    Running time : 3.57 minutes                                             ||
+||                                                                            ||
+|| Write the final count table.                                               ||
+|| Write the read assignment summary.                                         ||
+||                                                                            ||
+|| Summary of counting results can be found in file "BSY-05.txt.summary"      ||
+||                                                                            ||
+\\============================================================================// 
+15. To make Read_Count_Matrix-
+$cut -f 1,7 BSY-01.txt > BSY-01_counts.txt  
+Note: We have to do all these 18 samples
+paste LeafControl NeckControl LeafInfect NeckInfect LI.txt  >> Read_Count_Matrix
+0r
+16. Extract Gene ID and Read Count for Each Sample-
+$ awk '{print $1, $2}' BSY-01.fixed.bam > BSY-01_counts.txt
+awk '{print $1, $2}' BSY-02.bam > BSY-02_counts.txt
+
+17. Combine All the Extracted Files
+sort BSY-01_counts.txt > BSY-01_sorted.txt
+sort BSY-02_counts.txt > BSY-02_sorted.txt
+sort BSY-03_counts.txt > BSY-03_sorted.txt
+# Repeat sorting for all the other files
+18. Paste
+$paste BSY-01_sorted.txt BSY-02_sorted.txt BSY-03_sorted.txt BSY-04_sorted.txt BSY-05_sorted.txt BSY-06_sorted.txt BSY-07_sorted.txt BSY-08_sorted.txt BSY-09_sorted.txt BSY-10_sorted.txt BSY-11_sorted.txt BSY-12_sorted.txt BSY-13_sorted.txt BSY-14_sorted.txt BSY-15_sorted.txt BSY-16_sorted.txt BSY-17_sorted.txt BSY-18_sorted.txt > combined_counts.txt
+19. Add Headers (Optional)
+echo -e "gene_id\tBSY-01\tBSY-02\tBSY-03\tBSY-04\tBSY-05\tBSY-06\tBSY-07\tBSY-08\tBSY-09\tBSY-10\tBSY-11\tBSY-12\tBSY-13\tBSY-14\tBSY-15\tBSY-16\tBSY-17\tBSY-18" > final_combined_counts.txt
+cat combined_counts.txt >> final_combined_counts.txt
+.fa
